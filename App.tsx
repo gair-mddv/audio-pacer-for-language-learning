@@ -64,7 +64,7 @@ const App: React.FC = () => {
             setProcessedAudioUrl(url);
 
             const originalName = file.name.split('.').slice(0, -1).join('.');
-            setProcessedFileName(`${originalName}_paced.wav`);
+            setProcessedFileName(`${originalName}_paced.mp3`);
 
             setProcessingState(ProcessingState.DONE);
             setProgressMessage('Processing complete!');

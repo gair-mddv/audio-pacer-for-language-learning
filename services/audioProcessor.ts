@@ -89,59 +89,47 @@ function createPaddedAudio(originalBuffer: AudioBuffer, chunks: SpeechChunk[], s
     return newBuffer;
 }
 
-
-function encodeWav(audioBuffer: AudioBuffer): Blob {
-    const numOfChan = audioBuffer.numberOfChannels;
-    const length = audioBuffer.length * numOfChan * 2 + 44;
-    const buffer = new ArrayBuffer(length);
-    const view = new DataView(buffer);
-    const channels: Float32Array[] = [];
-    let i, sample;
-    let offset = 0;
-    let pos = 0;
-
-    // write WAV header
-    setUint32(0x46464952); // "RIFF"
-    setUint32(length - 8); // file length - 8
-    setUint32(0x45564157); // "WAVE"
-
-    setUint32(0x20746d66); // "fmt " chunk
-    setUint32(16); // length = 16
-    setUint16(1); // PCM (uncompressed)
-    setUint16(numOfChan);
-    setUint32(audioBuffer.sampleRate);
-    setUint32(audioBuffer.sampleRate * 2 * numOfChan); // avg. bytes/sec
-    setUint16(numOfChan * 2); // block-align
-    setUint16(16); // 16-bit
-    
-    setUint32(0x61746164); // "data" - chunk
-    setUint32(length - pos - 4); // chunk length
-
-    for (i = 0; i < numOfChan; i++) {
-        channels.push(audioBuffer.getChannelData(i));
+function encodeMp3(audioBuffer: AudioBuffer): Blob {
+    const lamejs = (window as any).lamejs;
+    if (typeof lamejs === 'undefined') {
+        throw new Error('lamejs library is not loaded. Please include it in your HTML.');
     }
 
-    while (pos < length) {
-        for (i = 0; i < numOfChan; i++) {
-            sample = Math.max(-1, Math.min(1, channels[i][offset])); // clamp
-            sample = (0.5 + sample < 0 ? sample * 32768 : sample * 32767) | 0; // scale to 16-bit signed int
-            view.setInt16(pos, sample, true); // write 16-bit sample
-            pos += 2;
+    const { numberOfChannels, sampleRate } = audioBuffer;
+    const mp3encoder = new lamejs.Mp3Encoder(numberOfChannels, sampleRate, 128); // 128 kbps
+    const mp3Data = [];
+
+    const convertBuffer = (buffer: Float32Array): Int16Array => {
+        const data = new Int16Array(buffer.length);
+        for (let i = 0; i < buffer.length; i++) {
+            data[i] = Math.max(-1, Math.min(1, buffer[i])) * 32767;
         }
-        offset++;
+        return data;
+    };
+
+    const left = convertBuffer(audioBuffer.getChannelData(0));
+    const right = numberOfChannels > 1 ? convertBuffer(audioBuffer.getChannelData(1)) : undefined;
+
+    const sampleBlockSize = 1152;
+    for (let i = 0; i < left.length; i += sampleBlockSize) {
+        const leftChunk = left.subarray(i, i + sampleBlockSize);
+        let rightChunk;
+        if (right) {
+            rightChunk = right.subarray(i, i + sampleBlockSize);
+        }
+
+        const mp3buf = mp3encoder.encodeBuffer(leftChunk, rightChunk);
+        if (mp3buf.length > 0) {
+            mp3Data.push(mp3buf);
+        }
+    }
+
+    const mp3buf = mp3encoder.flush();
+    if (mp3buf.length > 0) {
+        mp3Data.push(mp3buf);
     }
     
-    function setUint16(data: number) {
-        view.setUint16(pos, data, true);
-        pos += 2;
-    }
-
-    function setUint32(data: number) {
-        view.setUint32(pos, data, true);
-        pos += 4;
-    }
-
-    return new Blob([view], { type: 'audio/wav' });
+    return new Blob(mp3Data, { type: 'audio/mpeg' });
 }
 
 
@@ -163,10 +151,10 @@ export async function processAudioFile(
     setProgress(`Step 3/4: Reconstructing audio with pauses... (found ${speechChunks.length} phrases)`);
     const newBuffer = createPaddedAudio(originalBuffer, speechChunks, settings);
 
-    setProgress('Step 4/4: Encoding final WAV file...');
-    const wavBlob = encodeWav(newBuffer);
+    setProgress('Step 4/4: Encoding final MP3 file...');
+    const mp3Blob = encodeMp3(newBuffer);
     
-    return wavBlob;
+    return mp3Blob;
 }
 
 export async function mergeAudioFiles(
@@ -217,6 +205,6 @@ export async function mergeAudioFiles(
         offset += buffer.length;
     }
     
-    const wavBlob = encodeWav(mergedBuffer);
-    return wavBlob;
+    const mp3Blob = encodeMp3(mergedBuffer);
+    return mp3Blob;
 }

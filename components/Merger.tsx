@@ -63,7 +63,7 @@ const Merger: React.FC = () => {
             const mergedBlob = await mergeAudioFiles(files, setProgressMessage);
             const url = URL.createObjectURL(mergedBlob);
             setMergedAudioUrl(url);
-            setMergedFileName(`merged_audio_${new Date().getTime()}.wav`);
+            setMergedFileName(`merged_audio_${new Date().getTime()}.mp3`);
             setProcessingState(ProcessingState.DONE);
             setProgressMessage('Merging complete!');
         } catch (err) {
