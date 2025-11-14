@@ -1,0 +1,5 @@
+{
+  "name": "Audio Pacer for Language Learning",
+  "description": "An application to process audio files for language learning. It automatically detects spoken sentences and increases the silence between them, allowing time for repetition and practice (shadowing).",
+  "requestFramePermissions": []
+}
