@@ -6,6 +6,7 @@ import SettingsPanel from './components/SettingsPanel';
 import AudioPlayer from './components/AudioPlayer';
 import { DownloadIcon, RefreshCwIcon, UploadCloudIcon } from './components/icons';
 import Merger from './components/Merger';
+import ArchivePacer from './components/ArchivePacer';
 
 const TabButton: React.FC<{ title: string; active: boolean; onClick: () => void }> = ({ title, active, onClick }) => (
     <button
@@ -23,7 +24,7 @@ const TabButton: React.FC<{ title: string; active: boolean; onClick: () => void 
 
 
 const App: React.FC = () => {
-    const [mode, setMode] = useState<'pacer' | 'merger'>('pacer');
+    const [mode, setMode] = useState<'pacer' | 'merger' | 'archive'>('pacer');
     const [file, setFile] = useState<File | null>(null);
     const [processingState, setProcessingState] = useState<ProcessingState>(ProcessingState.IDLE);
     const [progressMessage, setProgressMessage] = useState<string>('');
@@ -98,7 +99,7 @@ const App: React.FC = () => {
         setError(null);
     }
 
-    const handleModeChange = (newMode: 'pacer' | 'merger') => {
+    const handleModeChange = (newMode: 'pacer' | 'merger' | 'archive') => {
         resetPacerStateForModeSwitch();
         setMode(newMode);
     };
@@ -110,16 +111,17 @@ const App: React.FC = () => {
                     <h1 className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-teal-300">
                         Audio Toolkit
                     </h1>
-                    <p className="mt-2 text-gray-400">Pace or merge your language learning audio files.</p>
+                    <p className="mt-2 text-gray-400">Pace, merge, or reconstruct your language learning audio files.</p>
                 </header>
                 
                 <main className="bg-gray-800/50 p-6 rounded-xl shadow-2xl border border-gray-700/50">
-                     <div className="flex mb-6 border-b border-gray-700">
-                        <TabButton title="Pacer" active={mode === 'pacer'} onClick={() => handleModeChange('pacer')} />
+                     <div className="flex mb-6 border-b border-gray-700 overflow-x-auto">
+                        <TabButton title="Auto Pacer" active={mode === 'pacer'} onClick={() => handleModeChange('pacer')} />
+                        <TabButton title="Archive Pacer" active={mode === 'archive'} onClick={() => handleModeChange('archive')} />
                         <TabButton title="Merger" active={mode === 'merger'} onClick={() => handleModeChange('merger')} />
                     </div>
 
-                    {error && (
+                    {error && mode === 'pacer' && (
                         <div className="bg-red-900/50 border border-red-700 text-red-300 px-4 py-3 rounded-lg relative mb-4" role="alert">
                             <strong className="font-bold">Error: </strong>
                             <span className="block sm:inline">{error}</span>
@@ -196,6 +198,8 @@ const App: React.FC = () => {
                             )}
                         </>
                     )}
+
+                    {mode === 'archive' && <ArchivePacer />}
 
                     {mode === 'merger' && <Merger />}
 

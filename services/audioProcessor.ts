@@ -3,7 +3,7 @@ import { Settings, SpeechChunk } from '../types';
 // FIX: Cast window to any to allow for webkitAudioContext fallback for older browsers.
 const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
 
-async function decodeAudio(file: File): Promise<AudioBuffer> {
+async function decodeAudio(file: Blob): Promise<AudioBuffer> {
     const arrayBuffer = await file.arrayBuffer();
     return await audioContext.decodeAudioData(arrayBuffer);
 }
@@ -207,4 +207,110 @@ export async function mergeAudioFiles(
     
     const mp3Blob = encodeMp3(mergedBuffer);
     return mp3Blob;
+}
+
+export async function processZipArchive(
+    zipFile: File,
+    pauseMultiplier: number,
+    fixedSilenceDuration: number,
+    setProgress: (message: string) => void
+): Promise<{ pacedBlob: Blob, mergedBlob: Blob, count: number }> {
+    const JSZip = (window as any).JSZip;
+    if (!JSZip) {
+        throw new Error("JSZip library not found.");
+    }
+
+    setProgress("Step 1/6: Loading archive...");
+    const zip = new JSZip();
+    const loadedZip = await zip.loadAsync(zipFile);
+
+    setProgress("Step 2/6: Extracting and sorting audio files...");
+    
+    // Get all files that look like audio
+    const fileEntries: Array<{ name: string; obj: any }> = [];
+    
+    zip.forEach((relativePath: string, zipEntry: any) => {
+        if (!zipEntry.dir && !relativePath.includes('__MACOSX')) {
+            const lowerName = relativePath.toLowerCase();
+            if (lowerName.endsWith('.mp3') || lowerName.endsWith('.wav')) {
+                fileEntries.push({ name: relativePath, obj: zipEntry });
+            }
+        }
+    });
+
+    if (fileEntries.length === 0) {
+        throw new Error("No MP3 or WAV files found in the archive.");
+    }
+
+    // Sort files naturally (1, 2, 10 instead of 1, 10, 2)
+    fileEntries.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+
+    setProgress(`Step 3/6: Decoding ${fileEntries.length} audio files...`);
+    const decodedBuffers: AudioBuffer[] = [];
+
+    for (let i = 0; i < fileEntries.length; i++) {
+        const entry = fileEntries[i];
+        setProgress(`Decoding ${i + 1}/${fileEntries.length}: ${entry.name.split('/').pop()}`);
+        const arrayBuffer = await entry.obj.async("arraybuffer");
+        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+        decodedBuffers.push(audioBuffer);
+    }
+
+    // Check consistency (Sample Rate/Channels) based on first file
+    const reference = decodedBuffers[0];
+    const { sampleRate, numberOfChannels } = reference;
+    
+    // Calculate total lengths
+    let totalPacedLength = 0;
+    let totalMergedLength = 0;
+    
+    const fixedSilenceSamples = Math.floor(sampleRate * fixedSilenceDuration);
+
+    for (const buffer of decodedBuffers) {
+        if (buffer.sampleRate !== sampleRate) {
+            throw new Error(`Sample rate mismatch in ${fileEntries[decodedBuffers.indexOf(buffer)].name}. Expected ${sampleRate}Hz.`);
+        }
+        if (buffer.numberOfChannels !== numberOfChannels) {
+             throw new Error(`Channel count mismatch in ${fileEntries[decodedBuffers.indexOf(buffer)].name}.`);
+        }
+
+        // Paced Length Calculation
+        totalPacedLength += buffer.length + Math.ceil(buffer.length * pauseMultiplier);
+        
+        // Merged Length Calculation (Buffer + Fixed Silence)
+        totalMergedLength += buffer.length + fixedSilenceSamples;
+    }
+
+    setProgress(`Step 4/6: constructing buffers...`);
+    
+    const pacedBuffer = audioContext.createBuffer(numberOfChannels, totalPacedLength, sampleRate);
+    const mergedBuffer = audioContext.createBuffer(numberOfChannels, totalMergedLength, sampleRate);
+    
+    let pacedOffset = 0;
+    let mergedOffset = 0;
+
+    for (const buffer of decodedBuffers) {
+        const fileDuration = buffer.length;
+        
+        // --- Fill Paced Buffer ---
+        for (let channel = 0; channel < numberOfChannels; channel++) {
+            pacedBuffer.getChannelData(channel).set(buffer.getChannelData(channel), pacedOffset);
+        }
+        const pacedSilence = Math.ceil(fileDuration * pauseMultiplier);
+        pacedOffset += fileDuration + pacedSilence;
+
+        // --- Fill Merged Buffer ---
+        for (let channel = 0; channel < numberOfChannels; channel++) {
+            mergedBuffer.getChannelData(channel).set(buffer.getChannelData(channel), mergedOffset);
+        }
+        mergedOffset += fileDuration + fixedSilenceSamples;
+    }
+
+    setProgress("Step 5/6: Encoding Paced MP3...");
+    const pacedBlob = encodeMp3(pacedBuffer);
+
+    setProgress("Step 6/6: Encoding Fast MP3...");
+    const mergedBlob = encodeMp3(mergedBuffer);
+
+    return { pacedBlob, mergedBlob, count: fileEntries.length };
 }
